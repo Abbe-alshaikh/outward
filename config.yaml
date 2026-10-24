@@ -1,0 +1,28 @@
+app:
+  container_id: !ENV ${outward_app_container_id:outward_bdh_01}
+  heartbeat:
+    alive_timer: !ENV ${outward_app_heartbeat_alive_timer:0}
+    object: !ENV ${outward_app_heartbeat_object:Generic outward}
+    topic: !ENV ${outward_app_heartbeat_topic:App ok}
+    host: !ENV ${outward_app_heartbeat_host:Default host}
+  # Debug 10, INFO 20, WARN 30, ERROR 40, CRITICAL 50
+  log_level: !ENV ${outward_app_log_level:20}
+  paths:
+    mount_checks: !ENV ${outward_app_paths_mount_checks} 
+    archive: !ENV ${outward_app_paths_archive:/mnt/okq8_bank/BankWorks/Prod/IF781_archiveData_Out/}
+bankworks:
+  oracle_client: !ENV ${outward_bankworks_oracle_client:/lib/oracle/21/client64/lib}
+  db_conn: !ENV ${outward_db_conn}
+  db_password: !ENV ${outward_db_password}
+  db_user: !ENV ${outward_db_user}
+  db_schema: !ENV ${outward_db_schema:bw3}
+  array_size: !ENV ${outward_bankworks_array_size:50000}
+  chunks: !ENV ${outward_bankworks_chunks:1024}
+  retry_limit: !ENV ${outward_db_retry_limit:3}
+  db_timeout: !ENV ${outward_db_timeout:1800000}
+  institution_number: !ENV ${outward_bankworks_institution_number:00000051}
+  procs:
+    package: bw3.bw_okq8_biztalk_integration
+    get_pending_tasks: get_pending_tasks_v2
+    complete_task: update_biztalk_log_ext
+    container_startup: container_startup
