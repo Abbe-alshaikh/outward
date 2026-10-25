@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import oracledb
 import pytest
 from pandas import DataFrame
 
@@ -8,53 +7,9 @@ from outward.config import Settings
 from outward.errors import DatabaseError
 from outward.models import PendingTask, TaskResult
 from outward.repository import TaskRepository
-from tests.fakes import FakeCursor, FakeLob, settings_dict
+from tests.fakes import FakeBankworks, FakeLob, settings_dict
 
 TASK = PendingTask("00000051", "OUT_TRAPETS", 42)
-
-
-class FakeConn:
-    def __init__(self, log):
-        self.log = log
-
-    def commit(self):
-        self.log.append("commit")
-
-    def rollback(self):
-        self.log.append("rollback")
-
-
-class FakeBwCursor(FakeCursor):
-    def __init__(self, log, fail_callproc=False, **kw):
-        super().__init__(**kw)
-        self.log = log
-        self.fail_callproc = fail_callproc
-
-    def var(self, kind):
-        return f"<{kind.name}>"
-
-    def callproc(self, name, params):
-        if self.fail_callproc:
-            raise oracledb.DatabaseError("ORA-06550")
-        self.log.append(("callproc", name, params))
-
-
-class FakeBankworks:
-    """Records every call; returns whatever was queued in ``returns``."""
-
-    def __init__(self, returns=None, **cursor_kw):
-        self.log = []
-        self.returns = list(returns or [])
-        self.curBw3 = FakeBwCursor(self.log, **cursor_kw)
-        self.dbConn = FakeConn(self.log)
-
-    def callproc(self, procedure, parameters):
-        self.log.append(("callproc", procedure, parameters))
-        return self.returns.pop(0)
-
-    def callproc_returning_cursor(self, procedure, parameters, cursor_field):
-        self.log.append(("cursor", procedure, parameters, cursor_field))
-        return self.returns.pop(0)
 
 
 @pytest.fixture

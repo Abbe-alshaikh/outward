@@ -49,6 +49,50 @@ class FakeCursor:
         return self.rows.pop(0) if self.rows else None
 
 
+class FakeConn:
+    def __init__(self, log):
+        self.log = log
+
+    def commit(self):
+        self.log.append("commit")
+
+    def rollback(self):
+        self.log.append("rollback")
+
+
+class FakeBwCursor(FakeCursor):
+    def __init__(self, log, fail_callproc=False, **kw):
+        super().__init__(**kw)
+        self.log = log
+        self.fail_callproc = fail_callproc
+
+    def var(self, kind):
+        return f"<{kind.name}>"
+
+    def callproc(self, name, params):
+        if self.fail_callproc:
+            raise oracledb.DatabaseError("ORA-06550")
+        self.log.append(("callproc", name, params))
+
+
+class FakeBankworks:
+    """Records every call; returns whatever was queued in ``returns``."""
+
+    def __init__(self, returns=None, **cursor_kw):
+        self.log = []
+        self.returns = list(returns or [])
+        self.curBw3 = FakeBwCursor(self.log, **cursor_kw)
+        self.dbConn = FakeConn(self.log)
+
+    def callproc(self, procedure, parameters):
+        self.log.append(("callproc", procedure, parameters))
+        return self.returns.pop(0)
+
+    def callproc_returning_cursor(self, procedure, parameters, cursor_field):
+        self.log.append(("cursor", procedure, parameters, cursor_field))
+        return self.returns.pop(0)
+
+
 def settings_dict(tmp_path: Path, **app_overrides) -> dict:
     mount = tmp_path / "mount.check"
     mount.write_text("ok")
