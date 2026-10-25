@@ -7,6 +7,10 @@ app:
     host: !ENV ${outward_app_heartbeat_host:Default host}
   # Debug 10, INFO 20, WARN 30, ERROR 40, CRITICAL 50
   log_level: !ENV ${outward_app_log_level:20}
+  # Encoding used when an outward/archive LOB is a CLOB (BLOBs are written as-is)
+  clob_encoding: !ENV ${outward_app_clob_encoding:cp1252}
+  # Seconds before a shell successor is killed; 0 disables the timeout
+  successor_timeout: !ENV ${outward_app_successor_timeout:0}
   paths:
     mount_checks: !ENV ${outward_app_paths_mount_checks} 
     archive: !ENV ${outward_app_paths_archive:/mnt/okq8_bank/BankWorks/Prod/IF781_archiveData_Out/}
