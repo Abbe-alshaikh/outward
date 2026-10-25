@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>outward — how it works</title>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "default", securityLevel: "strict", sequence: { showSequenceNumbers: true } });
+</script>
+<style>
+  body { font-family: system-ui, Segoe UI, sans-serif; max-width: 1100px; margin: 2rem auto; padding: 0 1rem; line-height: 1.55; color: #1f2328; }
+  h1 { border-bottom: 2px solid #d0d7de; padding-bottom: .3rem; }
+  h2 { margin-top: 2.5rem; border-bottom: 1px solid #d0d7de; padding-bottom: .2rem; }
+  code { background: #f6f8fa; padding: .1rem .3rem; border-radius: 4px; }
+  .mermaid { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+  .note { background: #fff8c5; border-left: 4px solid #d4a72c; padding: .6rem 1rem; border-radius: 4px; }
+  .warn { background: #ffebe9; border-left: 4px solid #cf222e; padding: .6rem 1rem; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #d0d7de; padding: .4rem .6rem; text-align: left; vertical-align: top; }
+  th { background: #f6f8fa; }
+  nav a { margin-right: 1rem; }
+</style>
+</head>
+<body>
+
+<h1>outward: how it works</h1>
+<nav>
+  <a href="#big">1. Big picture</a><a href="#modules">2. Modules</a><a href="#seq">3. Main sequence</a>
+  <a href="#succ">4. Successors</a><a href="#files">5. File lifecycle</a><a href="#state">6. Task states</a><a href="#issues">7. Gotchas</a>
+</nav>
+
+<h2 id="big">1. Big picture: what is this?</h2>
+<p>
+  <b>outward</b> is a <b>batch worker</b> that runs in a container. Each time it runs, it asks the
+  <b>BankWorks Oracle database</b> which "outward" integration tasks are pending. For each task it pulls the file
+  content (a BLOB/CLOB) out of the database, writes it to a <b>mounted network share</b> so <b>BizTalk</b> can pick it up,
+  and can also write an archive copy and run "successor" steps. Finally it tells the database the task is done.
+</p>
+<p>In short: <b>database → files on a share</b>. "Outward" means data leaving the bank system for downstream integrations.</p>
+
+<pre class="mermaid">
+flowchart LR
+    subgraph Container["Container: outward (python app.py)"]
+        APP["app.py<br/>orchestrator"]
+        DB["db.py<br/>stored-proc wrappers"]
+        UTIL["util.py<br/>file I/O and successors"]
+        APP --> DB
+        APP --> UTIL
+        UTIL -. "runs SQL for successors" .-> ORA
+    end
+    CFG[("config.yaml<br/>+ env vars")] --> APP
+    LIB["okq8common<br/>(internal lib: Config,<br/>Logger, Bankworks)"] --> APP
+    DB -- "callproc via oracledb" --> ORA[("Oracle BankWorks<br/>package bw3.bw_okq8_biztalk_integration")]
+    UTIL -- "writes files" --> SHARE[("Mounted share<br/>/mnt/okq8_bank/...")]
+    UTIL -- "archive copy" --> ARCH[("Archive folder<br/>YYYY/MM/DD/")]
+    UTIL -- "sh script.sh" --> SH["Shell successor"]
+    SHARE --> BIZ["BizTalk<br/>(picks up files)"]
+</pre>
+
+<h2 id="modules">2. Modules and the function call graph</h2>
+<table>
+  <tr><th>File</th><th>Role</th><th>Key functions</th></tr>
+  <tr><td><code>app.py</code></td><td>Entry point. Loads config, builds logger and DB connection as <b>module-level globals</b>, then loops over tasks.</td><td><code>main()</code>, <code>handle_task()</code></td></tr>
+  <tr><td><code>db.py</code></td><td>Thin wrappers around the Oracle stored procedures. No business logic.</td><td><code>set_container_startup</code>, <code>get_pending_tasks</code>, <code>get_task</code>, <code>complete_task</code></td></tr>
+  <tr><td><code>util.py</code></td><td>Filesystem work: mount checks, LOB→file streaming, CSV export, the tmp→final move, and successor handling.</td><td><code>verify_mounts</code>, <code>write_task_to_disk</code>, <code>write_lob</code>, <code>move_file</code>, <code>call_successors</code>, <code>run_bash</code>, <code>handle_file</code>, <code>process_successor_row</code>, <code>write_successor_data</code>, <code>write_csv</code></td></tr>
+  <tr><td><code>config.yaml</code></td><td>All settings, each overridable by an env var via <code>!ENV ${name:default}</code>. Also names the stored procedures.</td><td>n/a</td></tr>
+  <tr><td><code>requirements.txt</code></td><td><b>Empty.</b> The code actually needs <code>oracledb</code>, <code>pandas</code>, and the private <code>okq8common</code>.</td><td>n/a</td></tr>
+</table>
+
+<pre class="mermaid">
+flowchart TD
+    classDef app fill:#ddf4ff,stroke:#0969da
+    classDef db fill:#dafbe1,stroke:#1a7f37
+    classDef util fill:#fff8c5,stroke:#9a6700
+    classDef ext fill:#f6f8fa,stroke:#57606a,stroke-dasharray:4 3
+
+    MAIN["__main__<br/>Config, OKQ8Logging, Bankworks"]:::app --> main["main()"]:::app
+    main --> verify_mounts:::util
+    main --> set_container_startup:::db
+    main --> get_pending_tasks:::db
+    main -->|"for each row"| handle_task["handle_task(task)"]:::app
+
+    handle_task --> get_task:::db
+    handle_task --> write_task_to_disk:::util
+    handle_task --> complete_task:::db
+
+    write_task_to_disk --> write_lob:::util
+    write_task_to_disk --> move_file:::util
+    write_task_to_disk -->|"if OUTWARD_SUCCESSOR"| call_successors:::util
+
+    call_successors -->|"hshl"| run_bash:::util
+    call_successors -->|"hcsv / hbin"| handle_file:::util
+    handle_file -->|"each line"| process_successor_row:::util
+    handle_file -->|"each line"| write_successor_data:::util
+    write_successor_data -->|"hcsv"| write_csv:::util
+    write_successor_data -->|"hbin"| write_lob
+
+    set_container_startup & get_pending_tasks & get_task & complete_task --> BW["Bankworks<br/>callproc / callproc_returning_cursor"]:::ext
+</pre>
+<p>Legend: <span style="background:#ddf4ff">blue = app.py</span>, <span style="background:#dafbe1">green = db.py</span>, <span style="background:#fff8c5">yellow = util.py</span>, dashed = external library.</p>
+
+<h2 id="seq">3. Sequence diagram: one full run</h2>
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant M as __main__ (app.py)
+    participant A as main / handle_task
+    participant U as util.py
+    participant D as db.py
+    participant O as Oracle (BankWorks)
+    participant FS as Mounted share
+
+    M->>M: Config("config.yaml") → config
+    M->>M: OKQ8Logging(log_level) → logger
+    M->>O: Bankworks(config) opens connection → bw3
+    M->>A: main()
+
+    A->>U: verify_mounts(config)
+    U->>FS: Path(f).is_file() for each mount_checks entry
+    alt any marker file missing
+        A-->>M: sys.exit(EX_OSFILE)
+    end
+
+    A->>D: set_container_startup(container_id, retry_limit)
+    D->>O: package.container_startup
+    Note over O: releases tasks this container<br/>locked but never finished
+    alt returns falsy
+        A-->>M: sys.exit(EX_IOERR)
+    end
+
+    A->>D: get_pending_tasks(institution_number, container_id)
+    D->>O: package.get_pending_tasks_v2 (OUT cursor)
+    O-->>A: DataFrame of tasks<br/>(INSTITUTION_NUMBER, INTEGRATION_NAME, PROCESS_ID)
+
+    loop for each task row
+        A->>D: get_task(institution, INTEGRATION_NAME, PROCESS_ID)
+        D->>O: package.&lt;INTEGRATION_NAME&gt; (dynamic proc name!)
+        O-->>A: DataFrame, 1 row: OUTWARD_FILENAME, OUTWARD_DATA (LOB),<br/>ARCHIVE_FILENAME, ARCHIVE_DATA, OUTWARD_SUCCESSOR
+
+        A->>U: write_task_to_disk(row)
+        U->>FS: write_lob → dir/tmp/name (chunked read)
+        U->>FS: move_file: dir/tmp/name → dir/name
+        opt ARCHIVE_FILENAME set
+            U->>FS: write_lob → archive/YYYY/MM/DD/name (or full path)
+        end
+        opt OUTWARD_SUCCESSOR set
+            U->>U: call_successors(...)  (see section 4)
+        end
+        U-->>A: (file_name, file_count, file_size, status, additional_data)
+
+        A->>D: complete_task(params tuple)
+        D->>O: COMMIT
+        D->>O: package.update_biztalk_log_ext(...)
+        D->>O: COMMIT
+    end
+    A-->>M: "Finish processing all pending tasks"
+    M->>M: sys.exit()
+</pre>
+
+<h2 id="succ">4. Successors: the optional extra step</h2>
+<p>
+  A task row can set <code>OUTWARD_SUCCESSOR</code>. In that case <b>the file just written is not only data, it is also instructions</b>:
+</p>
+<ul>
+  <li><b><code>hshl</code></b>: the written file is a <b>shell script</b>, run with <code>sh &lt;file&gt;</code>. Exit code 0 and empty stderr gives status <code>002</code> (OK). Anything else gives <code>003</code> (failed).</li>
+  <li><b><code>hcsv</code> / <code>hbin</code></b>: the written file is a <b>manifest</b>. Each line is <code>§</code>-separated:
+    <br><code>KIND § SQL_OR_TABLE § ? § DIR § FILENAME § [STATUS] § [ADDITIONAL_DATA]</code>
+    <br>If KIND is <code>TABLE</code> or <code>VIEW</code>, the SQL becomes <code>select * from X</code>. Otherwise column 1 is the raw SQL. Every line produces one extra file: a tab-separated CSV for <code>hcsv</code>, or the first column's LOB for <code>hbin</code>.</li>
+  <li>Any other value is ignored (status <code>002</code>).</li>
+</ul>
+
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant W as write_task_to_disk
+    participant C as call_successors
+    participant R as run_bash
+    participant H as handle_file
+    participant P as process_successor_row
+    participant S as write_successor_data
+    participant O as Oracle
+    participant FS as Filesystem
+
+    W->>C: successor_type, successor_name = OUTWARD_FILENAME
+    alt type == "hshl"
+        C->>R: run_bash(file)
+        R->>FS: subprocess: sh file
+        FS-->>R: returncode, stdout, stderr
+        R-->>C: (0, 0, "002" or "003", "")
+    else type in ("hcsv", "hbin")
+        C->>H: handle_file(file, type)
+        H->>FS: open(file, cp1252)
+        loop each line in manifest
+            H->>P: split on "§"
+            P-->>H: status, additional_data, sql, out_path
+            H->>S: write_successor_data(sql, out_path, type)
+            S->>O: cursor.execute(sql)  (arraysize = array_size)
+            alt hcsv
+                S->>FS: write_csv: header + fetchmany() batches, tab-delimited
+            else hbin
+                S->>FS: write_lob(fetchone()[0])
+            end
+            S-->>H: bytes written
+        end
+        H-->>C: (count, total_size, last status, last additional_data)
+    else other
+        C-->>W: (0, 0, "002", "")
+    end
+    C-->>W: totals are added to file_count / file_size
+</pre>
+
+<h2 id="files">5. File lifecycle on disk</h2>
+<p>The <code>tmp/</code> subfolder exists so that BizTalk, which watches the destination folder, never sees a half-written file.</p>
+<pre class="mermaid">
+flowchart LR
+    LOB[("OUTWARD_DATA<br/>LOB in Oracle")] -->|"write_lob<br/>chunk = getchunksize × chunks"| TMP["/share/dir/tmp/FILE<br/>(invisible to BizTalk)"]
+    TMP -->|"move_file (shutil.move)"| FINAL["/share/dir/FILE<br/>BizTalk picks it up"]
+    FINAL -.->|"if successor"| SUCC["run as script, or read<br/>as a manifest → more files"]
+    ALOB[("ARCHIVE_DATA<br/>LOB")] -->|"write_lob<br/>(if ARCHIVE_FILENAME)"| ARCH["/archive/YYYY/MM/DD/NAME<br/>(or the full path given)"]
+</pre>
+
+<h2 id="state">6. Task state across runs (inferred from the DB calls)</h2>
+<p>The real state machine lives in the PL/SQL package, which is not in this repo. This diagram is inferred from how the Python code uses the procedures.</p>
+<pre class="mermaid">
+stateDiagram-v2
+    [*] --> Pending: integration queues a task
+    Pending --> Locked: get_pending_tasks_v2(container_id)
+    Locked --> Completed_002: complete_task status 002 (OK)
+    Locked --> Completed_003: complete_task status 003 (successor failed)
+    Locked --> Pending: container crashed, then next start<br/>container_startup resets it (up to retry_limit)
+    Completed_002 --> [*]
+    Completed_003 --> [*]
+</pre>
+
+<h2 id="issues">7. Gotchas I noticed while reading</h2>
+<div class="warn">
+<ol>
+  <li><b>The "not visible until DB completion" guarantee is weaker than the docstring says.</b> <code>move_file</code> publishes the file <i>before</i> <code>complete_task</code> commits. If the process dies in between, BizTalk already has the file, the task gets reset on restart, and the file is produced again (a possible duplicate).</li>
+  <li><b><code>requirements.txt</code> is empty.</b> The code needs <code>oracledb</code>, <code>pandas</code>, and <code>okq8common</code>.</li>
+  <li><b>Hidden globals:</b> <code>handle_task</code>/<code>main</code> use <code>bw3</code>, <code>config</code>, and <code>logger</code>, which are only created under <code>if __name__ == "__main__"</code>. Importing <code>app</code> from tests or another module gives a <code>NameError</code>.</li>
+  <li><b><code>handle_file</code> with an empty manifest:</b> <code>completion_status</code> is never assigned, so you get an <code>UnboundLocalError</code>. With many lines, only the <i>last</i> line's status is kept.</li>
+  <li><b><code>get_task</code> returning an empty DataFrame</b> makes <code>.iloc[0]</code> raise <code>IndexError</code>. Only a non-DataFrame result is handled.</li>
+  <li><b><code>ARCHIVE_DATA</code> being NULL</b> while <code>ARCHIVE_FILENAME</code> is set crashes <code>write_lob</code> (<code>None.getchunksize()</code>).</li>
+  <li><b>Bare <code>except:</code></b> in <code>write_successor_data</code> swallows the real Oracle error. Only "Error processing file" gets logged.</li>
+  <li><b>Trust boundary:</b> the database decides which stored procedure is called (<code>INTEGRATION_NAME</code>), which SQL runs (manifest), and which shell script runs (<code>hshl</code>). That's fine if the DB is fully trusted. Just be aware that DB contents act as code here.</li>
+  <li><code>config.app.heartbeat.*</code>, <code>db_timeout</code>, and <code>oracle_client</code> are not used by this repo. They are presumably used inside <code>okq8common</code>, or not at all.</li>
+  <li>Small things: the <code>set_container_startup</code> docstring says it returns a DataFrame, but the annotation says <code>bool</code>. <code>file_count</code> is passed twice in the completion tuple, which is probably "expected vs. written". The <code>write_task_to_disk</code> docstring mentions a ".temp suffix", but the code uses a <code>tmp/</code> folder.</li>
+</ol>
+</div>
+
+</body>
+</html>

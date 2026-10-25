@@ -6,6 +6,11 @@ steps, then marks each task complete in the database.
 
 See [REVIEW.md](REVIEW.md) for the review findings and the design of this version.
 
+Visual guides (download and open in a browser, diagrams load from a CDN):
+
+- `docs/original-code-explained.html`: how the *original* code worked (architecture, call graph, sequence diagrams)
+- `docs/review.html`: REVIEW.md with rendered diagrams
+
 ## Layout
 
 ```
