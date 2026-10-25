@@ -59,8 +59,15 @@ def test_successor_timeout(tmp_path):
     ["x; execute immediate 'drop table t'", "a b", "1abc", "", "proc(1)", "--"],
 )
 def test_procedure_names_that_are_not_identifiers_are_rejected(name):
-    with pytest.raises(ConfigError):
+    with pytest.raises(ValueError):
         qualified_procedure("bw3.pkg", name)
+
+
+def test_invalid_procedure_in_config_is_a_config_error(tmp_path):
+    cfg = settings_dict(tmp_path)
+    cfg["bankworks"]["procs"]["complete_task"] = "x;drop"
+    with pytest.raises(ConfigError, match="Invalid Oracle identifier"):
+        Settings.from_dict(cfg)
 
 
 def test_valid_procedure_name():

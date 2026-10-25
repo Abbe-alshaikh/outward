@@ -26,7 +26,7 @@ def qualified_procedure(package: str, procedure: str) -> str:
     parts = package.split(".") + [procedure]
     for part in parts:
         if not _ORACLE_IDENTIFIER.match(part or ""):
-            raise ConfigError(f"Invalid Oracle identifier {part!r} in {package}.{procedure}")
+            raise ValueError(f"Invalid Oracle identifier {part!r} in {package}.{procedure}")
     return ".".join(parts)
 
 
@@ -82,8 +82,11 @@ class Settings:
 
         # Validate the static procedure names now rather than on first use.
         p = settings.procedures
-        for name in (p.get_pending_tasks, p.complete_task, p.container_startup):
-            p.qualified(name)
+        try:
+            for name in (p.get_pending_tasks, p.complete_task, p.container_startup):
+                p.qualified(name)
+        except ValueError as e:
+            raise ConfigError(str(e)) from e
         return settings
 
 
