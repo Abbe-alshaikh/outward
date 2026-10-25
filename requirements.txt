@@ -1,0 +1,5 @@
+# Runtime dependencies. okq8common is an internal package (Config, OKQ8Logging,
+# Bankworks) and must be installed from the internal package index.
+okq8common
+oracledb>=2.0
+pandas>=1.5

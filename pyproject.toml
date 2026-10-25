@@ -1,0 +1,10 @@
+[project]
+name = "outward"
+version = "2.0.0"
+description = "Writes pending BankWorks outward integration files to disk for BizTalk"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra"
