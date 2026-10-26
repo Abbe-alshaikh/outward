@@ -63,7 +63,7 @@ now has a regression test.
 | B11 | `mount_checks` env var unset | `AttributeError: None.split` | `ConfigError` at start-up | `test_unset_mount_checks_is_a_config_error` |
 | B12 | LOB read returns no data before `size()` is reached | Infinite loop | `StorageError` | `test_lob_that_stops_returning_data_raises_instead_of_looping_forever` |
 | B13 | Bare `except:` around successor SQL | The ORA- error is swallowed; the log only says "Error processing file" | Catch `oracledb.Error`, keep the message and chain it | `test_run_query_wraps_database_errors` |
-| B14 | `NaN` in optional columns | NaN is truthy, so it is treated as a real archive file name | Normalise None, NaN and blank to `None` | `test_fetch_payload_maps_row_and_normalises_nulls` |
+| B14 | `NaN` in optional columns | NaN is truthy, so it passes the `if` checks and then crashes: `len(nan)` raises `TypeError` (archive) and `nan.lower()` raises `AttributeError` (successor) | Normalise None, NaN and blank to `None` | `test_fetch_payload_maps_row_and_normalises_nulls` |
 | B15 | Successor CSV/BIN outputs written in place | BizTalk can pick up a half-written file | Same stage-then-rename as the main file | `test_failed_write_does_not_publish_partial_file` |
 
 ### 2.3 Security
